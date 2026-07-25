@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { updateTradeNewFields } from "@/lib/db";
 
 // Seed demo data — realistic trading journal with 3 accounts, 6 strategies,
 // ~65 trades, 6 rules, 14 days of psychological checks, 3 goals.
@@ -28,6 +29,15 @@ interface SeedTrade {
   notes: string;
   lessons: string;
   status: string;
+  // New template fields (optional — auto-derived when absent)
+  marketSession?: string;
+  marketBias?: string;
+  timeframe?: string;
+  riskPercent?: number;
+  setupValid?: boolean;
+  rulesFollowed?: boolean;
+  biggestMistake?: string;
+  improvementNext?: string;
 }
 
 function daysAgo(n: number, hour = 9, minute = 30): Date {
@@ -1230,7 +1240,249 @@ function computeRRForTrade(t: SeedTrade): number | null {
   }
 }
 
+// ============================================================
+// Discipline & calibration fields — derived from existing trade data
+// (used both at seed time and to backfill pre-existing trades)
+// ============================================================
+
+function deriveSession(t: Pick<SeedTrade, "instrument" | "assetClass" | "entryDate">): string {
+  const h = t.entryDate.getHours();
+  // Crypto: asia for night entries, london/new_york for day entries
+  if (t.assetClass === "crypto") {
+    if (h < 7 || h >= 22) return "asia";
+    if (h >= 7 && h < 12) return "london";
+    return "new_york";
+  }
+  // Stocks: always New York session (US market)
+  if (t.assetClass === "stock") return "new_york";
+  // Forex: by hour & pair
+  if (t.instrument.includes("JPY") && (h < 7 || h >= 23)) return "asia";
+  if (h < 7) return "asia";
+  if (h < 12) return "london";
+  if (h < 16) return "overlap";
+  if (h < 22) return "new_york";
+  return "sydney";
+}
+
+function deriveBias(t: Pick<SeedTrade, "direction" | "ruleViolated" | "emotion" | "exitReason">): string {
+  // Counter-trend losers (rule violations) → bias opposite to direction
+  const isViolation =
+    !!t.ruleViolated ||
+    t.emotion === "FOMO" ||
+    t.emotion === "avidité" ||
+    t.emotion === "frustration" ||
+    t.exitReason === "violation des règles";
+  if (isViolation && Math.random() < 0.7) {
+    return t.direction === "long" ? "bearish" : "bullish";
+  }
+  // ~20% neutral
+  if (Math.random() < 0.2) return "neutral";
+  // Otherwise aligned with direction
+  return t.direction === "long" ? "bullish" : "bearish";
+}
+
+function deriveTimeframe(t: Pick<SeedTrade, "strategyName" | "assetClass">): string {
+  if (t.assetClass === "stock") return Math.random() < 0.5 ? "H4" : "D1";
+  if (t.assetClass === "crypto") return Math.random() < 0.5 ? "H4" : "H1";
+  switch (t.strategyName) {
+    case "Scalp":
+      return Math.random() < 0.6 ? "M5" : "M15";
+    case "News":
+      return Math.random() < 0.5 ? "M5" : "M15";
+    case "Range":
+      return Math.random() < 0.5 ? "M15" : "H1";
+    case "Breakout":
+      return Math.random() < 0.6 ? "M15" : "H1";
+    case "Pullback":
+      return Math.random() < 0.5 ? "H1" : "H4";
+    case "Trend Following":
+      return Math.random() < 0.5 ? "H4" : "D1";
+    default:
+      return "H1";
+  }
+}
+
+function deriveRiskPercent(t: Pick<SeedTrade, "ruleViolated" | "emotion" | "disciplineScore">): number {
+  const indisciplined =
+    !!t.ruleViolated ||
+    t.emotion === "FOMO" ||
+    t.emotion === "avidité" ||
+    t.disciplineScore <= 5;
+  if (indisciplined) {
+    // 3.0% – 5.0% (overleveraging)
+    return Math.round((3 + Math.random() * 2) * 10) / 10;
+  }
+  // Disciplined: 1.0% – 2.0%
+  return Math.round((1 + Math.random() * 1) * 10) / 10;
+}
+
+function deriveSetupValid(t: Pick<SeedTrade, "ruleViolated" | "emotion" | "exitReason" | "confidence">): boolean {
+  if (t.exitReason === "violation des règles") return false;
+  if (t.ruleViolated && t.confidence <= 5) return false;
+  if (t.emotion === "FOMO" && Math.random() < 0.7) return false;
+  // ~75% true overall
+  return Math.random() < 0.75;
+}
+
+function deriveRulesFollowed(t: Pick<SeedTrade, "ruleViolated" | "emotion" | "exitReason" | "disciplineScore">): boolean {
+  if (t.ruleViolated) return false;
+  if (t.exitReason === "violation des règles") return false;
+  if (t.emotion === "FOMO" || t.emotion === "frustration") return false;
+  if (t.disciplineScore <= 4) return false;
+  return true;
+}
+
+function deriveBiggestMistake(t: Pick<SeedTrade, "ruleViolated" | "emotion" | "exitReason" | "status">): string | null {
+  if (t.status === "open") return null;
+  if (t.exitReason === "trop tôt") return "Sortie trop tôt";
+  if (t.exitReason === "violation des règles") return "Pas respecté mon plan";
+  if (t.emotion === "FOMO") return "FOMO";
+  if (t.emotion === "avidité") return "Taille de position excessive";
+  if (t.emotion === "frustration") return "Revenge trading";
+  if (t.emotion === "peur") return "Sortie trop tôt";
+  if (t.emotion === "espoir") return "Entrée impulsive sans confirmation";
+  if (t.ruleViolated?.includes("FOMO")) return "FOMO";
+  if (t.ruleViolated?.includes("stop")) return "Pas de stop loss";
+  if (t.ruleViolated?.includes("news")) return "Ignorer la structure du marché";
+  if (t.ruleViolated?.includes("3 trades")) return "Surtrading";
+  if (t.ruleViolated?.includes("revenge")) return "Revenge trading";
+  if (t.ruleViolated?.includes("Laisser courir")) return "Sortie trop tôt";
+  // Disciplined winning trades: no mistake
+  return null;
+}
+
+function deriveImprovementNext(mistake: string | null): string | null {
+  if (!mistake) return Math.random() < 0.3 ? "Journaliser chaque trade" : null;
+  switch (mistake) {
+    case "Sortie trop tôt":
+      return "Laisser courir les gagnants";
+    case "Taille de position excessive":
+      return "Calculer le risque avant l'entrée";
+    case "Entrée impulsive sans confirmation":
+      return "Attendre la confirmation de la bougie";
+    case "Pas de stop loss":
+      return "Respecter le stop initial";
+    case "Revenge trading":
+      return "Max 3 trades par jour";
+    case "Surtrading":
+      return "Max 3 trades par jour";
+    case "Ignorer la structure du marché":
+      return "Ne pas trader pendant les news";
+    case "FOMO":
+      return "Attendre la confirmation de la bougie";
+    case "Pas respecté mon plan":
+      return "Revoir le plan avant la séance";
+    case "Avoir déplacé mon stop":
+      return "Respecter le stop initial";
+    default:
+      return "Revoir le plan avant la séance";
+  }
+}
+
+interface DerivedFields {
+  marketSession: string;
+  marketBias: string;
+  timeframe: string;
+  riskPercent: number;
+  pnlPercent: number | null;
+  setupValid: boolean;
+  rulesFollowed: boolean;
+  biggestMistake: string | null;
+  improvementNext: string | null;
+}
+
+function deriveNewFields(
+  t: SeedTrade,
+  pnl: number,
+  initialCapital: number
+): DerivedFields {
+  const session = t.marketSession ?? deriveSession(t);
+  const bias = t.marketBias ?? deriveBias(t);
+  const timeframe = t.timeframe ?? deriveTimeframe(t);
+  const riskPercent = t.riskPercent ?? deriveRiskPercent(t);
+  const pnlPercent = initialCapital > 0 ? (pnl / initialCapital) * 100 : null;
+  const setupValid = t.setupValid ?? deriveSetupValid(t);
+  const rulesFollowed = t.rulesFollowed ?? deriveRulesFollowed(t);
+  const biggestMistake =
+    t.biggestMistake !== undefined
+      ? t.biggestMistake
+      : deriveBiggestMistake(t);
+  const improvementNext =
+    t.improvementNext !== undefined
+      ? t.improvementNext
+      : deriveImprovementNext(biggestMistake);
+  return {
+    marketSession: session,
+    marketBias: bias,
+    timeframe,
+    riskPercent,
+    pnlPercent,
+    setupValid,
+    rulesFollowed,
+    biggestMistake,
+    improvementNext,
+  };
+}
+
+// Backfill existing trades that lack the new template fields (Task 2 migration)
+async function backfillNewFields(): Promise<number> {
+  // Use raw SQL to detect unmigrated trades — the dev-server may have an old
+  // PrismaClient that doesn't recognise the marketSession column in findMany.
+  const unmigrated = await db.$queryRawUnsafe<Array<{ id: string }>>(
+    "SELECT id FROM Trade WHERE marketSession IS NULL"
+  );
+  if (unmigrated.length === 0) return 0;
+
+  const ids = unmigrated.map((r) => r.id);
+  const trades = await db.trade.findMany({
+    where: { id: { in: ids } },
+    include: { account: true, strategy: true },
+  });
+
+  for (const t of trades) {
+    const seedView: SeedTrade = {
+      instrument: t.instrument,
+      assetClass: t.assetClass,
+      direction: t.direction as "long" | "short",
+      orderType: t.orderType,
+      strategyName: t.strategy?.name ?? "",
+      entryPrice: t.entryPrice,
+      exitPrice: t.exitPrice ?? 0,
+      stopLoss: t.stopLoss ?? 0,
+      takeProfit: t.takeProfit ?? 0,
+      positionSize: t.positionSize,
+      fees: t.fees,
+      entryDate: t.entryDate,
+      durationMin: t.durationMin ?? 0,
+      entryReason: t.entryReason ?? "",
+      exitReason: t.exitReason ?? "",
+      ruleViolated: t.ruleViolated,
+      emotion: t.emotion ?? "",
+      emotionScore: t.emotionScore ?? 5,
+      confidence: t.confidence ?? 5,
+      disciplineScore: t.disciplineScore ?? 5,
+      notes: t.notes ?? "",
+      lessons: t.lessons ?? "",
+      status: t.status,
+    };
+    const derived = deriveNewFields(
+      seedView,
+      t.pnl,
+      t.account?.initialCapital ?? 10000
+    );
+    await updateTradeNewFields(t.id, derived);
+  }
+  return trades.length;
+}
+
 export async function seedDemoData(): Promise<{ accounts: number; trades: number }> {
+  // ── Migration: backfill new template fields on pre-existing trades ──
+  try {
+    await backfillNewFields();
+  } catch (e) {
+    console.error("backfillNewFields error", e);
+  }
+
   // Check if already seeded
   const existing = await db.account.count();
   if (existing > 0) {
@@ -1275,14 +1527,18 @@ export async function seedDemoData(): Promise<{ accounts: number; trades: number
   });
 
   // Trades
-  const allTradesByAccount: Array<{ account: string; trades: SeedTrade[] }> = [
-    { account: forexAccount.id, trades: FOREX_TRADES },
-    { account: cryptoAccount.id, trades: CRYPTO_TRADES },
-    { account: stockAccount.id, trades: STOCK_TRADES },
+  const allTradesByAccount: Array<{
+    account: string;
+    initialCapital: number;
+    trades: SeedTrade[];
+  }> = [
+    { account: forexAccount.id, initialCapital: 50000, trades: FOREX_TRADES },
+    { account: cryptoAccount.id, initialCapital: 10000, trades: CRYPTO_TRADES },
+    { account: stockAccount.id, initialCapital: 25000, trades: STOCK_TRADES },
   ];
 
   let tradeCount = 0;
-  for (const { account, trades } of allTradesByAccount) {
+  for (const { account, initialCapital, trades } of allTradesByAccount) {
     for (const t of trades) {
       const pnl = computePnlForTrade(t);
       const rr = computeRRForTrade(t);
@@ -1290,7 +1546,8 @@ export async function seedDemoData(): Promise<{ accounts: number; trades: number
         t.status === "closed"
           ? new Date(new Date(t.entryDate).getTime() + t.durationMin * 60000)
           : null;
-      await db.trade.create({
+      const derived = deriveNewFields(t, pnl, initialCapital);
+      const created = await db.trade.create({
         data: {
           accountId: account,
           strategyId: strategyMap.get(t.strategyName) ?? null,
@@ -1321,6 +1578,9 @@ export async function seedDemoData(): Promise<{ accounts: number; trades: number
           status: t.status,
         },
       });
+      // Write the new discipline/calibration columns via raw SQL — the
+      // cached dev-server PrismaClient may not recognise them in .create().
+      await updateTradeNewFields(created.id, derived);
       tradeCount++;
     }
   }

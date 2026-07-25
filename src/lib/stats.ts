@@ -47,6 +47,83 @@ export interface EmotionStat {
   totalPnl: number;
 }
 
+// ---------- Discipline & calibration (Task 2) ----------
+
+export interface SessionPerformance {
+  session: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  pnl: number;
+  avgPnl: number;
+}
+
+export interface TimeframePerformance {
+  timeframe: string;
+  trades: number;
+  winRate: number;
+  pnl: number;
+  avgRr: number;
+}
+
+export interface BiasPerformance {
+  bias: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  pnl: number;
+  withTrend: number;
+  counterTrend: number;
+  counterTrendLossRate: number;
+}
+
+export interface DisciplineScore {
+  setupValidPct: number;
+  rulesFollowedPct: number;
+  overallPct: number;
+  disciplinedTradesPnl: number;
+  indisciplinedTradesPnl: number;
+  disciplinedTradesCount: number;
+  indisciplinedTradesCount: number;
+}
+
+export interface ConfidenceBucket {
+  bucket: string;
+  trades: number;
+  winRate: number;
+  avgPnl: number;
+}
+
+export interface RiskBucket {
+  bucket: string;
+  count: number;
+  pnl: number;
+  isRecommended: boolean;
+}
+
+export interface MistakeStat {
+  text: string;
+  count: number;
+  totalLoss: number;
+}
+
+export interface ImprovementFollowThrough {
+  applied: number;
+  notApplied: number;
+  winRateAfterApplied: number;
+  winRateAfterNotApplied: number;
+  followThroughPct: number;
+}
+
+export interface SessionStrategyCell {
+  session: string;
+  strategy: string;
+  pnl: number;
+  trades: number;
+}
+
 export interface StatsResult {
   totalTrades: number;
   closedTrades: number;
@@ -99,6 +176,16 @@ export interface StatsResult {
     avgRR: number;
     expectancy: number;
   };
+  // Discipline & calibration (Task 2)
+  bySession: SessionPerformance[];
+  byTimeframe: TimeframePerformance[];
+  byBias: BiasPerformance[];
+  discipline: DisciplineScore;
+  confidenceCalibration: ConfidenceBucket[];
+  riskDistribution: RiskBucket[];
+  topMistakes: MistakeStat[];
+  improvementFollowThrough: ImprovementFollowThrough;
+  sessionStrategyMatrix: SessionStrategyCell[];
 }
 
 function isWin(t: Trade): boolean {
@@ -498,6 +585,16 @@ export function computeStats(
     byEmotion: performanceByEmotion(closed),
     last20: lastNComparison(closed, 20).last20,
     all: lastNComparison(closed, 20).all,
+    // Discipline & calibration (Task 2)
+    bySession: performanceBySession(closed),
+    byTimeframe: performanceByTimeframe(closed),
+    byBias: performanceByBias(closed),
+    discipline: disciplineScore(closed),
+    confidenceCalibration: confidenceCalibration(closed),
+    riskDistribution: riskDistribution(closed),
+    topMistakes: topMistakes(closed),
+    improvementFollowThrough: improvementFollowThrough(closed),
+    sessionStrategyMatrix: sessionStrategyMatrix(closed),
   };
 }
 
@@ -535,4 +632,327 @@ export function computeRR(input: {
 
 export function computeDurationMin(entry: Date, exit: Date): number {
   return Math.max(1, Math.round((exit.getTime() - entry.getTime()) / 60000));
+}
+
+// ============================================================
+// Discipline & calibration functions (Task 2)
+// ============================================================
+
+const SESSION_ORDER = ["london", "new_york", "asia", "sydney", "overlap"];
+const TIMEFRAME_ORDER = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1"];
+
+export function performanceBySession(trades: Trade[]): SessionPerformance[] {
+  const closed = trades.filter((t) => t.status === "closed");
+  const map = new Map<string, Trade[]>();
+  for (const t of closed) {
+    const s = t.marketSession ?? "unknown";
+    if (!map.has(s)) map.set(s, []);
+    map.get(s)!.push(t);
+  }
+  const results: SessionPerformance[] = [];
+  for (const session of SESSION_ORDER) {
+    const ts = map.get(session);
+    if (!ts || ts.length === 0) {
+      results.push({
+        session,
+        trades: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        pnl: 0,
+        avgPnl: 0,
+      });
+      continue;
+    }
+    const wins = ts.filter(isWin).length;
+    const losses = ts.filter(isLoss).length;
+    const pnl = ts.reduce((s, t) => s + t.pnl, 0);
+    results.push({
+      session,
+      trades: ts.length,
+      wins,
+      losses,
+      winRate: ts.length ? (wins / ts.length) * 100 : 0,
+      pnl,
+      avgPnl: ts.length ? pnl / ts.length : 0,
+    });
+  }
+  // Include unknown sessions (if any) at the end
+  for (const [session, ts] of map.entries()) {
+    if (SESSION_ORDER.includes(session)) continue;
+    const wins = ts.filter(isWin).length;
+    const losses = ts.filter(isLoss).length;
+    const pnl = ts.reduce((s, t) => s + t.pnl, 0);
+    results.push({
+      session,
+      trades: ts.length,
+      wins,
+      losses,
+      winRate: ts.length ? (wins / ts.length) * 100 : 0,
+      pnl,
+      avgPnl: ts.length ? pnl / ts.length : 0,
+    });
+  }
+  return results;
+}
+
+export function performanceByTimeframe(trades: Trade[]): TimeframePerformance[] {
+  const closed = trades.filter((t) => t.status === "closed");
+  const map = new Map<string, Trade[]>();
+  for (const t of closed) {
+    const tf = t.timeframe ?? "—";
+    if (!map.has(tf)) map.set(tf, []);
+    map.get(tf)!.push(t);
+  }
+  const results: TimeframePerformance[] = [];
+  for (const tf of TIMEFRAME_ORDER) {
+    const ts = map.get(tf);
+    if (!ts || ts.length === 0) continue;
+    const wins = ts.filter(isWin).length;
+    const pnl = ts.reduce((s, t) => s + t.pnl, 0);
+    const rrVals = ts
+      .map((t) => t.rrRatio)
+      .filter((r): r is number => r != null);
+    const avgRr = rrVals.length
+      ? rrVals.reduce((s, r) => s + r, 0) / rrVals.length
+      : 0;
+    results.push({
+      timeframe: tf,
+      trades: ts.length,
+      winRate: ts.length ? (wins / ts.length) * 100 : 0,
+      pnl,
+      avgRr,
+    });
+  }
+  return results;
+}
+
+function isCounterTrend(t: Trade): boolean {
+  if (!t.marketBias || t.marketBias === "neutral") return false;
+  if (t.direction === "long" && t.marketBias === "bearish") return true;
+  if (t.direction === "short" && t.marketBias === "bullish") return true;
+  return false;
+}
+
+export function performanceByBias(trades: Trade[]): BiasPerformance[] {
+  const closed = trades.filter((t) => t.status === "closed");
+  const biases = ["bullish", "bearish", "neutral"];
+  return biases.map((bias) => {
+    const ts = closed.filter((t) => (t.marketBias ?? "neutral") === bias);
+    const wins = ts.filter(isWin).length;
+    const losses = ts.filter(isLoss).length;
+    const pnl = ts.reduce((s, t) => s + t.pnl, 0);
+    const counter = ts.filter(isCounterTrend);
+    const withTrend = ts.length - counter.length;
+    const counterLosses = counter.filter(isLoss).length;
+    return {
+      bias,
+      trades: ts.length,
+      wins,
+      losses,
+      winRate: ts.length ? (wins / ts.length) * 100 : 0,
+      pnl,
+      withTrend,
+      counterTrend: counter.length,
+      counterTrendLossRate: counter.length
+        ? (counterLosses / counter.length) * 100
+        : 0,
+    };
+  });
+}
+
+export function disciplineScore(trades: Trade[]): DisciplineScore {
+  const closed = trades.filter((t) => t.status === "closed");
+  if (closed.length === 0) {
+    return {
+      setupValidPct: 0,
+      rulesFollowedPct: 0,
+      overallPct: 0,
+      disciplinedTradesPnl: 0,
+      indisciplinedTradesPnl: 0,
+      disciplinedTradesCount: 0,
+      indisciplinedTradesCount: 0,
+    };
+  }
+  const setupValidCount = closed.filter((t) => t.setupValid === true).length;
+  const rulesCount = closed.filter((t) => t.rulesFollowed === true).length;
+  const disciplined = closed.filter(
+    (t) => t.setupValid === true && t.rulesFollowed === true
+  );
+  const indisciplined = closed.filter(
+    (t) => !(t.setupValid === true && t.rulesFollowed === true)
+  );
+  const disciplinedPnl = disciplined.reduce((s, t) => s + t.pnl, 0);
+  const indisciplinedPnl = indisciplined.reduce((s, t) => s + t.pnl, 0);
+  return {
+    setupValidPct: (setupValidCount / closed.length) * 100,
+    rulesFollowedPct: (rulesCount / closed.length) * 100,
+    overallPct:
+      ((setupValidCount + rulesCount) / (closed.length * 2)) * 100,
+    disciplinedTradesPnl: disciplinedPnl,
+    indisciplinedTradesPnl: indisciplinedPnl,
+    disciplinedTradesCount: disciplined.length,
+    indisciplinedTradesCount: indisciplined.length,
+  };
+}
+
+export function confidenceCalibration(trades: Trade[]): ConfidenceBucket[] {
+  const closed = trades.filter(
+    (t) => t.status === "closed" && t.confidence != null
+  );
+  const buckets = [
+    { label: "1-3", min: 1, max: 3 },
+    { label: "4-6", min: 4, max: 6 },
+    { label: "7-8", min: 7, max: 8 },
+    { label: "9-10", min: 9, max: 10 },
+  ];
+  return buckets.map((b) => {
+    const ts = closed.filter(
+      (t) => (t.confidence ?? 0) >= b.min && (t.confidence ?? 0) <= b.max
+    );
+    const wins = ts.filter(isWin).length;
+    const pnl = ts.reduce((s, t) => s + t.pnl, 0);
+    return {
+      bucket: b.label,
+      trades: ts.length,
+      winRate: ts.length ? (wins / ts.length) * 100 : 0,
+      avgPnl: ts.length ? pnl / ts.length : 0,
+    };
+  });
+}
+
+export function riskDistribution(trades: Trade[]): RiskBucket[] {
+  const closed = trades.filter(
+    (t) => t.status === "closed" && t.riskPercent != null
+  );
+  const buckets = [
+    { label: "<1%", min: -Infinity, max: 1, isRecommended: false },
+    { label: "1-2%", min: 1, max: 2, isRecommended: true },
+    { label: "2-3%", min: 2, max: 3, isRecommended: false },
+    { label: "3-5%", min: 3, max: 5, isRecommended: false },
+    { label: ">5%", min: 5, max: Infinity, isRecommended: false },
+  ];
+  return buckets.map((b) => {
+    const ts = closed.filter(
+      (t) => (t.riskPercent ?? 0) >= b.min && (t.riskPercent ?? 0) < b.max
+    );
+    return {
+      bucket: b.label,
+      count: ts.length,
+      pnl: ts.reduce((s, t) => s + t.pnl, 0),
+      isRecommended: b.isRecommended,
+    };
+  });
+}
+
+// Common recurring mistake keywords — when biggestMistake text contains one of these
+// substrings (lowercase), it counts toward that mistake category.
+const MISTAKE_KEYWORDS: Array<{ key: string; patterns: string[] }> = [
+  { key: "Sortie trop tôt", patterns: ["sortie trop tôt", "trop tôt", "sorti avant", "sortie précoce"] },
+  { key: "Taille de position excessive", patterns: ["taille", "position excessive", "surdimensionné", "lot trop"] },
+  { key: "Entrée impulsive sans confirmation", patterns: ["impulsive", "impulsif", "sans confirmation", "entrée précipitée", "précipit"] },
+  { key: "Pas de stop loss", patterns: ["pas de stop", "sans stop", "stop loss manquant", "no stop"] },
+  { key: "Revenge trading", patterns: ["revenge", "revanche", "rattraper"] },
+  { key: "Stop déplacé", patterns: ["déplacé", "déplacer", "stop déplacé", "bougé le stop", "écarté le stop"] },
+  { key: "Surtrading", patterns: ["surtrading", "sur-trading", "trop de trades", "trop de positions"] },
+  { key: "Ignorer la structure du marché", patterns: ["structure", "ignorer", "à contre-tendance", "contre tendance"] },
+  { key: "FOMO", patterns: ["fomo", "peur de manquer"] },
+  { key: "Pas respecté mon plan", patterns: ["plan", "respecté", "respecter", "non respect"] },
+  { key: "Éviter les news", patterns: ["news", "actualité", "nfp", "fomc", "cpi"] },
+  { key: "Avoir déplacé mon stop", patterns: ["déplacé mon stop", "stop trop tard", "stop élargi"] },
+];
+
+export function topMistakes(trades: Trade[]): MistakeStat[] {
+  const counts = new Map<string, { count: number; loss: number }>();
+  for (const t of trades) {
+    if (!t.biggestMistake) continue;
+    const raw = t.biggestMistake.toLowerCase();
+    let matched = false;
+    for (const { key, patterns } of MISTAKE_KEYWORDS) {
+      if (patterns.some((p) => raw.includes(p))) {
+        const e = counts.get(key) ?? { count: 0, loss: 0 };
+        e.count += 1;
+        e.loss += Math.min(0, t.pnl);
+        counts.set(key, e);
+        matched = true;
+        break;
+      }
+    }
+    // If no keyword matched, use the trimmed text as its own category
+    if (!matched) {
+      const key = t.biggestMistake.trim().slice(0, 60);
+      if (!key) continue;
+      const e = counts.get(key) ?? { count: 0, loss: 0 };
+      e.count += 1;
+      e.loss += Math.min(0, t.pnl);
+      counts.set(key, e);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([text, v]) => ({
+      text,
+      count: v.count,
+      totalLoss: Math.abs(v.loss),
+    }))
+    .sort((a, b) => b.count - a.count || b.totalLoss - a.totalLoss)
+    .slice(0, 8);
+}
+
+export function improvementFollowThrough(
+  trades: Trade[]
+): ImprovementFollowThrough {
+  const sorted = sortTradesByEntry(trades);
+  let applied = 0;
+  let notApplied = 0;
+  let appliedWins = 0;
+  let notAppliedWins = 0;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const t = sorted[i];
+    const next = sorted[i + 1];
+    if (!t.improvementNext) continue;
+    if (next.rulesFollowed === true) {
+      applied += 1;
+      if (next.status === "closed" && next.pnl > 0) appliedWins += 1;
+    } else {
+      notApplied += 1;
+      if (next.status === "closed" && next.pnl > 0) notAppliedWins += 1;
+    }
+  }
+  const total = applied + notApplied;
+  return {
+    applied,
+    notApplied,
+    winRateAfterApplied: applied ? (appliedWins / applied) * 100 : 0,
+    winRateAfterNotApplied: notApplied
+      ? (notAppliedWins / notApplied) * 100
+      : 0,
+    followThroughPct: total ? (applied / total) * 100 : 0,
+  };
+}
+
+export function sessionStrategyMatrix(
+  trades: Trade[]
+): SessionStrategyCell[] {
+  const closed = trades.filter((t) => t.status === "closed");
+  const map = new Map<string, { pnl: number; trades: number }>();
+  for (const t of closed) {
+    const session = t.marketSession ?? "unknown";
+    const strategy = t.strategyId ?? "none";
+    const key = `${session}__${strategy}`;
+    const e = map.get(key) ?? { pnl: 0, trades: 0 };
+    e.pnl += t.pnl;
+    e.trades += 1;
+    map.set(key, e);
+  }
+  const cells: SessionStrategyCell[] = [];
+  for (const [key, v] of map.entries()) {
+    const [session, strategy] = key.split("__");
+    cells.push({
+      session,
+      strategy,
+      pnl: v.pnl,
+      trades: v.trades,
+    });
+  }
+  return cells;
 }

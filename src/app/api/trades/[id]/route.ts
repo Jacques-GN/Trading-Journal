@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, enrichTradesWithNewFields, updateTradeNewFields } from "@/lib/db";
 import { computePnl, computeRR, computeDurationMin } from "@/lib/stats";
 
 export async function GET(
@@ -13,7 +13,8 @@ export async function GET(
       include: { strategy: true, account: true },
     });
     if (!trade) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(trade);
+    const [enriched] = await enrichTradesWithNewFields([trade]);
+    return NextResponse.json(enriched);
   } catch (e) {
     console.error("GET /api/trades/[id] error", e);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
@@ -34,16 +35,25 @@ export async function PUT(
       assetClass,
       direction,
       orderType,
+      // Task 2 — handled via raw SQL below
+      marketSession,
+      marketBias,
+      timeframe,
       entryPrice,
       exitPrice,
       stopLoss,
       takeProfit,
       positionSize,
+      riskPercent,
       fees,
       entryDate,
       exitDate,
       pnl,
+      pnlPercent,
       rrRatio,
+      setupValid,
+      rulesFollowed,
+      durationMin: durationMinInput,
       entryReason,
       exitReason,
       ruleViolated,
@@ -51,6 +61,8 @@ export async function PUT(
       emotionScore,
       confidence,
       disciplineScore,
+      biggestMistake,
+      improvementNext,
       notes,
       lessons,
       status,
@@ -80,6 +92,16 @@ export async function PUT(
       durationMin = null;
     }
 
+    // Auto-compute pnlPercent when P/L changes
+    let finalPnlPercent: number | null | undefined = undefined;
+    if (pnlPercent !== undefined) {
+      finalPnlPercent = pnlPercent;
+    } else if (finalPnl !== undefined && accountId) {
+      const account = await db.account.findUnique({ where: { id: accountId } });
+      const cap = account?.initialCapital ?? 0;
+      finalPnlPercent = cap > 0 ? (finalPnl / cap) * 100 : null;
+    }
+
     const updated = await db.trade.update({
       where: { id },
       data: {
@@ -99,6 +121,7 @@ export async function PUT(
         ...(exitDate !== undefined ? { exitDate: exitDate ? new Date(exitDate) : null } : {}),
         ...(finalPnl !== undefined ? { pnl: finalPnl } : {}),
         ...(finalRR !== undefined ? { rrRatio: finalRR } : {}),
+        ...(durationMinInput !== undefined ? { durationMin: durationMinInput } : {}),
         ...(durationMin !== undefined ? { durationMin } : {}),
         ...(entryReason !== undefined ? { entryReason: entryReason ?? null } : {}),
         ...(exitReason !== undefined ? { exitReason: exitReason ?? null } : {}),
@@ -113,7 +136,22 @@ export async function PUT(
       },
       include: { strategy: true, account: true },
     });
-    return NextResponse.json(updated);
+
+    // Apply the new discipline/calibration fields via raw SQL.
+    const newFieldsUpdate: Parameters<typeof updateTradeNewFields>[1] = {};
+    if (marketSession !== undefined) newFieldsUpdate.marketSession = marketSession ?? null;
+    if (marketBias !== undefined) newFieldsUpdate.marketBias = marketBias ?? null;
+    if (timeframe !== undefined) newFieldsUpdate.timeframe = timeframe ?? null;
+    if (riskPercent !== undefined) newFieldsUpdate.riskPercent = riskPercent ?? null;
+    if (finalPnlPercent !== undefined) newFieldsUpdate.pnlPercent = finalPnlPercent;
+    if (setupValid !== undefined) newFieldsUpdate.setupValid = setupValid ?? null;
+    if (rulesFollowed !== undefined) newFieldsUpdate.rulesFollowed = rulesFollowed ?? null;
+    if (biggestMistake !== undefined) newFieldsUpdate.biggestMistake = biggestMistake || null;
+    if (improvementNext !== undefined) newFieldsUpdate.improvementNext = improvementNext || null;
+    await updateTradeNewFields(id, newFieldsUpdate);
+
+    const [enriched] = await enrichTradesWithNewFields([updated]);
+    return NextResponse.json(enriched);
   } catch (e) {
     console.error("PUT /api/trades/[id] error", e);
     return NextResponse.json({ error: "Failed" }, { status: 500 });

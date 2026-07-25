@@ -45,18 +45,29 @@ model Trade {
   direction      String   // long, short
   orderType      String   @default("market") // market, limit, stop
 
+  // Market context (from template IMG_7369)
+  marketSession  String?  // london, new_york, asia, sydney, overlap
+  marketBias     String?  // bullish, bearish, neutral — market trend at entry
+  timeframe      String?  // M1, M5, M15, M30, H1, H4, D1, W1
+
   // Prices
   entryPrice     Float
   exitPrice      Float?
   stopLoss       Float?
   takeProfit     Float?
   positionSize   Float    @default(1) // lots, shares, contracts
+  riskPercent    Float?   // % of capital risked on this trade
 
   // P/L
   pnl            Float    @default(0)
   pnlPips        Float?
+  pnlPercent     Float?   // P/L as % of capital
   fees           Float    @default(0)
   rrRatio        Float?   // realized risk/reward ratio
+
+  // Discipline flags (from template)
+  setupValid     Boolean? // was the setup valid before entering?
+  rulesFollowed  Boolean? // did the trader follow their rules?
 
   // Dates & duration
   entryDate      DateTime
@@ -77,6 +88,8 @@ model Trade {
   // Notes
   notes          String?
   lessons        String?  // lessons learned
+  biggestMistake String?  // biggest mistake made on this trade
+  improvementNext String? // improvement to apply on next trade
   screenshotUrl  String?
 
   // Status

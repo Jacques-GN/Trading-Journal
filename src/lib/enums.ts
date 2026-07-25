@@ -47,6 +47,66 @@ export type OrderType = (typeof ORDER_TYPES)[number];
 export const DIRECTIONS = ["long", "short"] as const;
 export type Direction = (typeof DIRECTIONS)[number];
 
+// Market context — sessions, bias, timeframes
+export const MARKET_SESSIONS = [
+  { value: "london", label: "Londres", abbr: "LDN" },
+  { value: "new_york", label: "New York", abbr: "NY" },
+  { value: "asia", label: "Asie", abbr: "ASIA" },
+  { value: "sydney", label: "Sydney", abbr: "SYD" },
+  { value: "overlap", label: "Chevauchement", abbr: "OVL" },
+] as const;
+export type MarketSession = (typeof MARKET_SESSIONS)[number]["value"];
+
+export const MARKET_BIAS = [
+  { value: "bullish", label: "Haussier" },
+  { value: "bearish", label: "Baissier" },
+  { value: "neutral", label: "Neutre" },
+] as const;
+export type MarketBias = (typeof MARKET_BIAS)[number]["value"];
+
+export const TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1"].map(
+  (value) => ({ value, label: value })
+) as ReadonlyArray<{ value: string; label: string }>;
+export type Timeframe = (typeof TIMEFRAMES)[number]["value"];
+
+export function sessionLabel(value?: string | null): string {
+  if (!value) return "—";
+  return MARKET_SESSIONS.find((s) => s.value === value)?.label ?? value;
+}
+export function sessionAbbr(value?: string | null): string {
+  if (!value) return "—";
+  return MARKET_SESSIONS.find((s) => s.value === value)?.abbr ?? value;
+}
+export function biasLabel(value?: string | null): string {
+  if (!value) return "—";
+  return MARKET_BIAS.find((b) => b.value === value)?.label ?? value;
+}
+
+// Common recurring mistakes (suggested values for the form dropdown / chip picker)
+export const BIGGEST_MISTAKES = [
+  "Sortie trop tôt",
+  "Taille de position excessive",
+  "Entrée impulsive sans confirmation",
+  "Pas de stop loss",
+  "Revenge trading",
+  "Avoir déplacé mon stop",
+  "Surtrading",
+  "Ignorer la structure du marché",
+  "FOMO",
+  "Pas respecté mon plan",
+] as const;
+
+export const IMPROVEMENT_NEXT = [
+  "Attendre la confirmation de la bougie",
+  "Calculer le risque avant l'entrée",
+  "Max 3 trades par jour",
+  "Ne pas trader pendant les news",
+  "Respecter le stop initial",
+  "Laisser courir les gagnants",
+  "Journaliser chaque trade",
+  "Revoir le plan avant la séance",
+] as const;
+
 export const TRADE_STATUS = ["open", "closed"] as const;
 export type TradeStatus = (typeof TRADE_STATUS)[number];
 

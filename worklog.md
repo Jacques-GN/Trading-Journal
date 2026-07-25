@@ -83,3 +83,87 @@ Stage Summary:
 - framer-motion view transitions, sonner toast notifications
 - French UI throughout (matches reference image context and user's discipline-focused trading journal intent)
 - App confirmed rendering at `/` with zero errors per dev.log
+
+---
+Task ID: 2
+Agent: full-stack-developer
+Task: Extend Trading Journal with 9 new template fields (marketSession, marketBias, timeframe, riskPercent, pnlPercent, setupValid, rulesFollowed, biggestMistake, improvementNext) + 9 new chart components + new "Discipline & Calibration" tab in Statistics
+
+Work Log:
+- Read worklog Task IDs 0 & 1 to understand the existing architecture (Next.js 16 + Prisma/SQLite + recharts + shadcn/ui + emerald/rose dark theme, 7 views, 44 demo trades already seeded)
+- Read prisma/schema.prisma — confirmed the 9 new fields (marketSession, marketBias, timeframe, riskPercent, pnlPercent, setupValid, rulesFollowed, biggestMistake, improvementNext) are already added to the Trade model
+- Updated src/lib/enums.ts: added MARKET_SESSIONS (5 entries with French labels + LDN/NY/ASIA/SYD/OVL abbreviations), MARKET_BIAS (bullish/bearish/neutral), TIMEFRAMES (M1-M5-M15-M30-H1-H4-D1-W1), BIGGEST_MISTAKES (10 suggested phrases), IMPROVEMENT_NEXT (8 actionable phrases), plus helper functions sessionLabel/sessionAbbr/biasLabel
+- Updated src/lib/stats.ts: added 9 new interfaces (SessionPerformance, TimeframePerformance, BiasPerformance, DisciplineScore, ConfidenceBucket, RiskBucket, MistakeStat, ImprovementFollowThrough, SessionStrategyCell), extended StatsResult with 9 new fields, added 9 new pure functions:
+  * performanceBySession — P/L + win rate per session (london/new_york/asia/sydney/overlap)
+  * performanceByTimeframe — win rate + avg R/R per timeframe
+  * performanceByBias — bullish/bearish/neutral breakdown with counter-trend stats
+  * disciplineScore — setupValidPct, rulesFollowedPct, overallPct, P/L of disciplined vs indisciplined trades
+  * confidenceCalibration — 4 confidence buckets (1-3, 4-6, 7-8, 9-10) with win rate
+  * riskDistribution — 5 buckets (<1%, 1-2%, 2-3%, 3-5%, >5%) with recommended flag
+  * topMistakes — parses biggestMistake text, groups by keyword patterns (12 keyword categories), returns top 8 by count
+  * improvementFollowThrough — for each trade with improvementNext, checks if the NEXT chronological trade had rulesFollowed=true
+  * sessionStrategyMatrix — pivot of session × strategy with P/L + trade count
+- Extended computeStats to call all 9 new functions and add results to StatsResult
+- Updated src/lib/seed.ts:
+  * Extended SeedTrade interface with 9 optional new fields
+  * Added deriveSession (by hour/asset class), deriveBias (counter-trend for violations), deriveTimeframe (by strategy), deriveRiskPercent (1-2% disciplined, 3-5% indisciplined), deriveSetupValid, deriveRulesFollowed, deriveBiggestMistake, deriveImprovementNext, deriveNewFields (combines all)
+  * Added backfillNewFields() function that finds trades with marketSession IS NULL and patches them with derived values — uses raw SQL for the WHERE clause (dev-server Prisma cache workaround) and updateTradeNewFields for the UPDATE
+  * Modified seedDemoData() to call backfillNewFields() at the start, and the db.trade.create call now uses updateTradeNewFields (raw SQL) for the new fields after creation
+- Updated src/lib/db.ts: added TradeNewFields interface, enrichTradesWithNewFields() helper that fetches new columns via $queryRawUnsafe and merges them into Trade objects, updateTradeNewFields() helper that uses $executeRawUnsafe to UPDATE the new columns (works around the dev-server's cached PrismaClient that doesn't recognize the new schema columns)
+- Updated src/app/api/trades/route.ts: GET enriches trades with new fields; POST creates the trade via Prisma (without new fields), then writes new fields via updateTradeNewFields, then returns the enriched trade
+- Updated src/app/api/trades/[id]/route.ts: GET enriches single trade; PUT updates standard fields via Prisma, applies new fields via updateTradeNewFields; returns enriched trade
+- Updated src/app/api/stats/route.ts: enriches trades with new fields before calling computeStats so discipline/session/calibration metrics are computed
+- Updated src/components/journal/trade-form.tsx:
+  * Added new fields to FormState + emptyForm + edit-form hydration
+  * Added SwitchField helper component (label + hint + Switch)
+  * Added "Session marché", "Biais de marché", "Timeframe" Selects to the Setup section
+  * Added "Risque par trade (%)" number input to the Prices section
+  * Added two SwitchField components ("Setup valide avant entrée" + "Règles suivies") to the Discipline section
+  * Added "Plus grosse erreur" + "Amélioration pour le prochain trade" textareas with chip-picker shortcuts to the Notes section
+  * All new fields included in the save payload
+- Updated src/components/journal/trade-detail.tsx:
+  * Extended TradeDetail interface with all 9 new fields
+  * Added new "Contexte marché" section (Session, Biais marché, Timeframe, Risque/trade)
+  * Added new "Discipline" section with DisciplineFlag components (green check / red X / amber warning icons for setupValid and rulesFollowed)
+  * Added biggestMistake (rose-tinted box) + improvementNext (emerald-tinted box) + P/L % displays
+- Updated src/components/journal/trade-table.tsx:
+  * Added "Sess." column showing the session abbreviation (LDN/NY/ASIA/SYD/OVL) in a small badge
+  * Added "Discipline" column showing a colored circle icon: green check (both setup+rules true), red X (both false), amber (partial), gray (unknown)
+  * Added disciplineDot() helper function with title attribute for tooltip
+  * Mobile cards also show session + discipline indicator
+- Created 9 new chart components in src/components/statistics/:
+  1. session-performance.tsx — Horizontal BarChart with P/L per session, emerald positive / rose negative bars (intensity scaled by magnitude), win rate label on right. Empty state when no session data.
+  2. timeframe-performance.tsx — Vertical BarChart with win rate per timeframe, color-coded (emerald ≥60%, amber 40-60%, rose <40%)
+  3. discipline-gauge.tsx — Two RadialBarChart gauges side by side (Setup Valide % and Règles Suivies %) with central % display, plus 3 comparison cards (P/L disciplined emerald, P/L indiscipliné rose, Écart amber insight)
+  4. confidence-calibration.tsx — Vertical BarChart of win rate per confidence bucket with overlay of ideal calibration line (dashed), amber insight callout when overconfident (high conf bucket < low conf win rate)
+  5. risk-distribution.tsx — Histogram of trade count per risk bucket, emerald for the recommended 1-2% zone, amber for <1%/2-3%, rose for >3%, legend + "Zone recommandée 1-2% — vous y êtes sur X%" banner
+  6. top-mistakes.tsx — Horizontal BarChart of top 8 mistakes by count, rose-colored bars (intensity scaled), total loss label on right, empty state CTA when no mistakes documented
+  7. bias-vs-direction.tsx — Stacked BarChart with 3 groups (Bullish/Bearish/Neutral), each split into "Avec tendance" (emerald) and "Contre tendance" (rose), insight callout with counter-trend loss rate
+  8. session-strategy-heatmap.tsx — CSS grid heatmap with rows = sessions, columns = strategies, cell color intensity (emerald = profit, rose = loss, opacity = magnitude), tooltip with P/L + trade count
+  9. improvement-followthrough.tsx — 3-column layout: RadialBarChart gauge showing follow-through %, emerald stat block for win rate after applied, rose stat block for win rate without application, insight banner with diff
+- Updated src/components/statistics/index.tsx:
+  * Added "Discipline" tab as the 5th tab (Performance / Distribution / Setups / Comportement / Discipline)
+  * Discipline tab layout: 3 KPI StatCards (Score de discipline, Setup valide, Règles suivies) → DisciplineGauge → RiskDistribution + ConfidenceCalibration (2-col) → BiasVsDirection + TopMistakes (2-col) → SessionStrategyHeatmap (full width) → ImprovementFollowThrough (full width)
+  * Added SessionPerformance + TimeframePerformance to the Comportement tab (2-col grid)
+  * Heatmap receives the strategies list (fetched separately) to label columns properly
+- Ran bun run db:generate to regenerate the Prisma client with the new schema
+- Discovered a critical issue: the dev-server has the OLD PrismaClient class cached in its module system (singleton via globalThis.prisma), so any Prisma call referencing the new fields fails with "Unknown argument". Solved by using $queryRawUnsafe / $executeRawUnsafe in lib/db.ts helpers (enrichTradesWithNewFields + updateTradeNewFields) which bypass the client's schema validation
+- Triggered migration: curl -X POST http://localhost:3000/api/seed — all 44 existing trades were backfilled with derived values for the 9 new fields (verified via direct DB inspection with bun script)
+- Verified end-to-end: /api/trades returns all 9 new fields populated, /api/stats returns all 9 new computed metrics (bySession, byTimeframe, byBias, discipline, confidenceCalibration, riskDistribution, topMistakes, improvementFollowThrough, sessionStrategyMatrix), POST /api/trades creates trades with new fields + auto-computes pnlPercent, DELETE works, / renders in 782ms with no runtime errors
+- Final lint: `bun run lint` returns 0 errors, 0 warnings
+- Final dev log: all routes return 200/201, no errors
+
+Stage Summary:
+- 9 new template fields captured in trade form (marketSession Select, marketBias Select, timeframe Select, riskPercent number input, setupValid Switch, rulesFollowed Switch, biggestMistake Textarea + chip picker, improvementNext Textarea + chip picker)
+- 9 new pure stats functions in lib/stats.ts (performanceBySession, performanceByTimeframe, performanceByBias, disciplineScore, confidenceCalibration, riskDistribution, topMistakes, improvementFollowThrough, sessionStrategyMatrix)
+- 9 new chart components in src/components/statistics/ (session-performance, timeframe-performance, discipline-gauge, confidence-calibration, risk-distribution, top-mistakes, bias-vs-direction, session-strategy-heatmap, improvement-followthrough)
+- New "Discipline" tab in Statistics view with 7 sections (KPI row, gauge, risk+calibration, bias+mistakes, heatmap, follow-through)
+- Trade detail drawer shows new "Contexte marché" + "Discipline" sections with appropriate badges and check/X icons
+- Trade table adds Session abbreviation badge + Discipline indicator column (green check / amber / red X) — visible on both desktop table and mobile cards
+- Existing 44 demo trades auto-backfilled with realistic derived values (london/new_york/asia/sydney/overlap sessions, M5-H4 timeframes, 1-5% risk levels, mistake+improvement text in French)
+- Discipline metrics show: 67% setup valid, 78% rules followed, disciplined P/L = +$31k vs indisciplined P/L = +$7.8k, top mistake = "Pas respecté mon plan" (1× −$12k), improvement follow-through = 77% applied, 90% win rate after applied vs 0% when ignored
+- Dev-server Prisma cache workaround: lib/db.ts exposes enrichTradesWithNewFields() + updateTradeNewFields() helpers that use $queryRawUnsafe / $executeRawUnsafe to read/write the new columns without going through the cached PrismaClient's schema validation
+- All API routes (trades GET/POST/PUT/DELETE, stats GET, seed GET/POST) use these helpers to ensure the new fields are properly persisted and returned
+- Color discipline respected: emerald (#10b981) for positive/disciplined, rose (#f43f5e) for negative/indisciplined, amber (#f59e0b) for warnings, NO indigo/blue
+- TypeScript strict throughout — no `any` in new code (uses Record<string, unknown> for raw SQL rows, Parameters<typeof helper> for type inference)
+- Lint passes with 0 errors, 0 warnings; app renders without runtime errors

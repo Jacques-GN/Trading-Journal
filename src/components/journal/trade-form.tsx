@@ -15,7 +15,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import { useAppStore } from "@/lib/store";
 import { useFetch, apiPost, apiPut } from "@/lib/api";
 import {
@@ -27,6 +26,11 @@ import {
   EMOTIONS,
   TRADE_STATUS,
   STRATEGY_COLORS,
+  MARKET_SESSIONS,
+  MARKET_BIAS,
+  TIMEFRAMES,
+  BIGGEST_MISTAKES,
+  IMPROVEMENT_NEXT,
 } from "@/lib/enums";
 import { toLocalInputValue } from "@/lib/format";
 import { computePnl, computeRR } from "@/lib/stats";
@@ -48,17 +52,25 @@ interface FormState {
   assetClass: string;
   direction: string;
   orderType: string;
+  marketSession: string;
+  marketBias: string;
+  timeframe: string;
   entryPrice: string;
   exitPrice: string;
   stopLoss: string;
   takeProfit: string;
   positionSize: string;
+  riskPercent: string;
   fees: string;
   entryDate: string;
   exitDate: string;
   entryReason: string;
   exitReason: string;
   ruleViolated: string;
+  setupValid: boolean;
+  rulesFollowed: boolean;
+  biggestMistake: string;
+  improvementNext: string;
   emotion: string;
   emotionScore: number;
   confidence: number;
@@ -75,17 +87,25 @@ const emptyForm: FormState = {
   assetClass: "forex",
   direction: "long",
   orderType: "market",
+  marketSession: "london",
+  marketBias: "neutral",
+  timeframe: "H1",
   entryPrice: "",
   exitPrice: "",
   stopLoss: "",
   takeProfit: "",
   positionSize: "1",
+  riskPercent: "1",
   fees: "0",
   entryDate: toLocalInputValue(new Date()),
   exitDate: toLocalInputValue(new Date()),
   entryReason: "selon le plan",
   exitReason: "selon le plan",
   ruleViolated: "",
+  setupValid: true,
+  rulesFollowed: true,
+  biggestMistake: "",
+  improvementNext: "",
   emotion: "calme",
   emotionScore: 5,
   confidence: 5,
@@ -136,12 +156,17 @@ export function TradeFormDialog({
         assetClass: editTrade.assetClass,
         direction: editTrade.direction,
         orderType: editTrade.orderType,
+        marketSession: editTrade.marketSession ?? "london",
+        marketBias: editTrade.marketBias ?? "neutral",
+        timeframe: editTrade.timeframe ?? "H1",
         entryPrice: String(editTrade.entryPrice),
         exitPrice: editTrade.exitPrice != null ? String(editTrade.exitPrice) : "",
         stopLoss: editTrade.stopLoss != null ? String(editTrade.stopLoss) : "",
         takeProfit:
           editTrade.takeProfit != null ? String(editTrade.takeProfit) : "",
         positionSize: String(editTrade.positionSize),
+        riskPercent:
+          editTrade.riskPercent != null ? String(editTrade.riskPercent) : "1",
         fees: String(editTrade.fees),
         entryDate: toLocalInputValue(new Date(editTrade.entryDate)),
         exitDate: editTrade.exitDate
@@ -150,6 +175,10 @@ export function TradeFormDialog({
         entryReason: editTrade.entryReason ?? "selon le plan",
         exitReason: editTrade.exitReason ?? "selon le plan",
         ruleViolated: editTrade.ruleViolated ?? "",
+        setupValid: editTrade.setupValid ?? true,
+        rulesFollowed: editTrade.rulesFollowed ?? true,
+        biggestMistake: editTrade.biggestMistake ?? "",
+        improvementNext: editTrade.improvementNext ?? "",
         emotion: editTrade.emotion ?? "calme",
         emotionScore: editTrade.emotionScore ?? 5,
         confidence: editTrade.confidence ?? 5,
@@ -212,11 +241,15 @@ export function TradeFormDialog({
       assetClass: form.assetClass,
       direction: form.direction,
       orderType: form.orderType,
+      marketSession: form.marketSession,
+      marketBias: form.marketBias,
+      timeframe: form.timeframe,
       entryPrice: parseFloat(form.entryPrice),
       exitPrice: form.exitPrice ? parseFloat(form.exitPrice) : null,
       stopLoss: form.stopLoss ? parseFloat(form.stopLoss) : null,
       takeProfit: form.takeProfit ? parseFloat(form.takeProfit) : null,
       positionSize: parseFloat(form.positionSize) || 1,
+      riskPercent: parseFloat(form.riskPercent) || null,
       fees: parseFloat(form.fees) || 0,
       entryDate: new Date(form.entryDate).toISOString(),
       exitDate:
@@ -226,6 +259,10 @@ export function TradeFormDialog({
       entryReason: form.entryReason,
       exitReason: form.status === "closed" ? form.exitReason : null,
       ruleViolated: form.ruleViolated || null,
+      setupValid: form.setupValid,
+      rulesFollowed: form.rulesFollowed,
+      biggestMistake: form.biggestMistake || null,
+      improvementNext: form.improvementNext || null,
       emotion: form.emotion,
       emotionScore: form.emotionScore,
       confidence: form.confidence,
@@ -377,6 +414,50 @@ export function TradeFormDialog({
                 </div>
               </Field>
             </Grid>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <Field label="Session marché">
+                <Select value={form.marketSession} onValueChange={(v) => update("marketSession", v)}>
+                  <SelectTrigger className="border-white/10 bg-white/5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-white/10 bg-zinc-900">
+                    {MARKET_SESSIONS.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Biais de marché">
+                <Select value={form.marketBias} onValueChange={(v) => update("marketBias", v)}>
+                  <SelectTrigger className="border-white/10 bg-white/5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-white/10 bg-zinc-900">
+                    {MARKET_BIAS.map((b) => (
+                      <SelectItem key={b.value} value={b.value}>
+                        {b.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Timeframe">
+                <Select value={form.timeframe} onValueChange={(v) => update("timeframe", v)}>
+                  <SelectTrigger className="border-white/10 bg-white/5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-white/10 bg-zinc-900">
+                    {TIMEFRAMES.map((tf) => (
+                      <SelectItem key={tf.value} value={tf.value}>
+                        {tf.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
             {newStratOpen && (
               <div className="mt-2 flex items-center gap-2 rounded-md border border-white/10 bg-white/5 p-3">
                 <Input
@@ -429,6 +510,11 @@ export function TradeFormDialog({
                 <Input type="number" step="any" value={form.fees} onChange={(e) => update("fees", e.target.value)} className="border-white/10 bg-white/5 font-mono" />
               </Field>
             </Grid>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <Field label="Risque par trade (%)">
+                <Input type="number" step="0.1" min="0" value={form.riskPercent} onChange={(e) => update("riskPercent", e.target.value)} placeholder="1.0" className="border-white/10 bg-white/5 font-mono" />
+              </Field>
+            </div>
             {(previewPnl != null || previewRR != null) && (
               <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border border-white/5 bg-white/5 p-3 text-sm">
                 {previewPnl != null && (
@@ -508,10 +594,24 @@ export function TradeFormDialog({
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label="Règle violée" className="md:col-span-2">
+              <Field label="Règle violée">
                 <Input value={form.ruleViolated} onChange={(e) => update("ruleViolated", e.target.value)} placeholder="Ex: Pas de FOMO, Max 3 trades par jour…" className="border-white/10 bg-white/5" />
               </Field>
             </Grid>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <SwitchField
+                label="Setup valide avant entrée"
+                hint="Le setup était-il confirmé avant l'entrée ?"
+                checked={form.setupValid}
+                onChange={(v) => update("setupValid", v)}
+              />
+              <SwitchField
+                label="Règles suivies"
+                hint="Ai-je respecté mon plan de trading ?"
+                checked={form.rulesFollowed}
+                onChange={(v) => update("rulesFollowed", v)}
+              />
+            </div>
           </Section>
 
           {/* Psychology */}
@@ -542,6 +642,38 @@ export function TradeFormDialog({
             <Field label="Notes">
               <Textarea value={form.notes} onChange={(e) => update("notes", e.target.value)} rows={3} placeholder="Contexte du trade, observation du marché…" className="border-white/10 bg-white/5" />
             </Field>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Field label="Plus grosse erreur">
+                <Textarea value={form.biggestMistake} onChange={(e) => update("biggestMistake", e.target.value)} rows={2} placeholder="Ex: Sortie trop tôt, FOMO, taille excessive…" className="border-white/10 bg-white/5" />
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {BIGGEST_MISTAKES.slice(0, 5).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => update("biggestMistake", m)}
+                      className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:border-rose-500/30 hover:text-rose-400"
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Amélioration pour le prochain trade">
+                <Textarea value={form.improvementNext} onChange={(e) => update("improvementNext", e.target.value)} rows={2} placeholder="Ex: Attendre la confirmation, calculer le risque…" className="border-white/10 bg-white/5" />
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {IMPROVEMENT_NEXT.slice(0, 5).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => update("improvementNext", m)}
+                      className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-muted-foreground hover:border-emerald-500/30 hover:text-emerald-400"
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+            </div>
             <div className="mt-3">
               <Field label="Leçons apprises">
                 <Textarea value={form.lessons} onChange={(e) => update("lessons", e.target.value)} rows={2} placeholder="Qu'avez-vous appris de ce trade ?" className="border-white/10 bg-white/5" />
@@ -608,6 +740,38 @@ function SliderField({
         <span className="font-mono text-sm font-semibold text-emerald-500">{value}</span>
       </div>
       <Slider value={[value]} onValueChange={onChange} min={1} max={10} step={1} className="[&_[role=slider]]:bg-emerald-500 [&_[role=slider]]:border-emerald-400 [&>span:first-child]:bg-white/10" />
+    </div>
+  );
+}
+
+function SwitchField({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-md border border-white/10 bg-white/5 p-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+          {label}
+        </p>
+        {hint && (
+          <p className="mt-0.5 text-[10px] text-muted-foreground">{hint}</p>
+        )}
+      </div>
+      <Switch
+        checked={checked}
+        onCheckedChange={onChange}
+        className={cn(
+          "data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-white/10"
+        )}
+      />
     </div>
   );
 }

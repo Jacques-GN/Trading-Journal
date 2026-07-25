@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import { useFetch, apiDelete } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -17,9 +18,19 @@ import {
   RText,
   EmotionTag,
 } from "@/components/shared/badges";
-import { formatCurrency, formatDateTime, formatDuration } from "@/lib/format";
-import { Trash2, Pencil } from "lucide-react";
+import {
+  formatCurrency,
+  formatDateTime,
+  formatDuration,
+  formatPercent,
+} from "@/lib/format";
+import {
+  sessionLabel,
+  biasLabel,
+} from "@/lib/enums";
+import { Trash2, Pencil, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 import { useAppStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 
 interface TradeDetail {
   id: string;
@@ -27,12 +38,17 @@ interface TradeDetail {
   assetClass: string;
   direction: string;
   orderType: string;
+  marketSession: string | null;
+  marketBias: string | null;
+  timeframe: string | null;
   entryPrice: number;
   exitPrice: number | null;
   stopLoss: number | null;
   takeProfit: number | null;
   positionSize: number;
+  riskPercent: number | null;
   pnl: number;
+  pnlPercent: number | null;
   fees: number;
   rrRatio: number | null;
   entryDate: string;
@@ -41,6 +57,10 @@ interface TradeDetail {
   entryReason: string | null;
   exitReason: string | null;
   ruleViolated: string | null;
+  setupValid: boolean | null;
+  rulesFollowed: boolean | null;
+  biggestMistake: string | null;
+  improvementNext: string | null;
   emotion: string | null;
   emotionScore: number | null;
   confidence: number | null;
@@ -124,6 +144,38 @@ export function TradeDetailDialog({
 
           <Separator className="bg-white/5" />
 
+          {/* Contexte marché (Task 2) */}
+          <div>
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-emerald-500">
+              Contexte marché
+            </p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <DetailItem label="Session" value={<Badge variant="outline" className="border-white/10 bg-white/5 text-[10px]">{sessionLabel(trade.marketSession)}</Badge>} />
+              <DetailItem label="Biais marché" value={<Badge variant="outline" className={cn("border text-[10px]", biasBadgeClass(trade.marketBias))}>{biasLabel(trade.marketBias)}</Badge>} />
+              <DetailItem label="Timeframe" value={<span className="font-mono text-sm">{trade.timeframe ?? "—"}</span>} />
+              <DetailItem label="Risque / trade" value={trade.riskPercent != null ? <span className={cn("font-mono text-sm", trade.riskPercent > 2 ? "text-rose-500" : "text-emerald-500")}>{formatPercent(trade.riskPercent)}</span> : "—"} />
+            </div>
+          </div>
+
+          <Separator className="bg-white/5" />
+
+          {/* Discipline (Task 2) */}
+          <div>
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-emerald-500">
+              Discipline
+            </p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <DisciplineFlag
+                label="Setup valide avant entrée"
+                value={trade.setupValid}
+              />
+              <DisciplineFlag
+                label="Règles suivies"
+                value={trade.rulesFollowed}
+              />
+            </div>
+          </div>
+
           <DetailRow>
             <DetailItem label="Date d'entrée" value={formatDateTime(trade.entryDate)} />
             <DetailItem label="Date de sortie" value={trade.exitDate ? formatDateTime(trade.exitDate) : "—"} />
@@ -140,6 +192,12 @@ export function TradeDetailDialog({
             </div>
           )}
 
+          {trade.pnlPercent != null && (
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <DetailItem label="P/L %" value={<span className={cn("font-mono text-sm", trade.pnlPercent > 0 ? "text-emerald-500" : "text-rose-500")}>{formatPercent(trade.pnlPercent, { sign: true })}</span>} />
+            </div>
+          )}
+
           <Separator className="bg-white/5" />
 
           <div>
@@ -153,6 +211,24 @@ export function TradeDetailDialog({
               <DetailItem label="Discipline" value={`${trade.disciplineScore ?? "—"}/10`} mono />
             </div>
           </div>
+
+          {trade.biggestMistake && (
+            <div className="rounded-md border border-rose-500/20 bg-rose-500/5 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-rose-500">
+                Plus grosse erreur
+              </p>
+              <p className="mt-1 text-sm">{trade.biggestMistake}</p>
+            </div>
+          )}
+
+          {trade.improvementNext && (
+            <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-500">
+                Amélioration pour le prochain trade
+              </p>
+              <p className="mt-1 text-sm">{trade.improvementNext}</p>
+            </div>
+          )}
 
           {trade.notes && (
             <div>
@@ -211,6 +287,56 @@ function fmtPrice(p: number, instrument: string): string {
   if (instrument.startsWith("BTC") || instrument.startsWith("ETH")) return p.toFixed(2);
   if (instrument.includes("USD") && instrument.length === 6) return p.toFixed(5);
   return p.toFixed(2);
+}
+
+function biasBadgeClass(bias: string | null): string {
+  if (bias === "bullish") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-500";
+  if (bias === "bearish") return "border-rose-500/30 bg-rose-500/10 text-rose-500";
+  return "border-white/10 bg-white/5 text-muted-foreground";
+}
+
+function DisciplineFlag({
+  label,
+  value,
+}: {
+  label: string;
+  value: boolean | null;
+}) {
+  const isTrue = value === true;
+  const isFalse = value === false;
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-md border p-3",
+        isTrue
+          ? "border-emerald-500/30 bg-emerald-500/5"
+          : isFalse
+          ? "border-rose-500/30 bg-rose-500/5"
+          : "border-white/10 bg-white/5"
+      )}
+    >
+      {isTrue ? (
+        <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+      ) : isFalse ? (
+        <XCircle className="h-5 w-5 text-rose-500" />
+      ) : (
+        <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+      )}
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-foreground">
+          {label}
+        </p>
+        <p
+          className={cn(
+            "text-xs",
+            isTrue ? "text-emerald-500" : isFalse ? "text-rose-500" : "text-muted-foreground"
+          )}
+        >
+          {isTrue ? "Oui" : isFalse ? "Non" : "Non renseigné"}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function DetailRow({ children }: { children: React.ReactNode }) {

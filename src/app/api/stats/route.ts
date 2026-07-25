@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, enrichTradesWithNewFields } from "@/lib/db";
 import { computeStats } from "@/lib/stats";
 
 export async function GET(req: NextRequest) {
@@ -21,8 +21,11 @@ export async function GET(req: NextRequest) {
       include: { strategy: true },
       orderBy: { entryDate: "asc" },
     });
+    // Merge the new discipline/calibration fields via raw SQL so that
+    // computeStats can produce the discipline/session/calibration metrics.
+    const enriched = await enrichTradesWithNewFields(trades);
 
-    const stats = computeStats(trades, account.initialCapital);
+    const stats = computeStats(enriched, account.initialCapital);
     // Enrich byStrategy with strategy name + color
     const strategies = await db.strategy.findMany();
     const stratMap = new Map(strategies.map((s) => [s.id, s]));

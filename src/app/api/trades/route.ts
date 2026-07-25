@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, enrichTradesWithNewFields, updateTradeNewFields } from "@/lib/db";
 import { computePnl, computeRR, computeDurationMin } from "@/lib/stats";
 
 export async function GET(req: NextRequest) {
@@ -32,7 +32,10 @@ export async function GET(req: NextRequest) {
       orderBy: { entryDate: "desc" },
       include: { strategy: true, account: true },
     });
-    return NextResponse.json(trades);
+    // Merge the new discipline/calibration fields via raw SQL (workaround
+    // for the dev-server Prisma client cache that doesn't know the new cols).
+    const enriched = await enrichTradesWithNewFields(trades);
+    return NextResponse.json(enriched);
   } catch (e) {
     console.error("GET /api/trades error", e);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
@@ -49,16 +52,25 @@ export async function POST(req: NextRequest) {
       assetClass,
       direction,
       orderType,
+      // Market context (Task 2) — written via raw SQL below
+      marketSession,
+      marketBias,
+      timeframe,
       entryPrice,
       exitPrice,
       stopLoss,
       takeProfit,
       positionSize,
+      riskPercent,
       fees,
       entryDate,
       exitDate,
       pnl,
+      pnlPercent,
       rrRatio,
+      setupValid,
+      rulesFollowed,
+      durationMin: durationMinInput,
       entryReason,
       exitReason,
       ruleViolated,
@@ -66,6 +78,8 @@ export async function POST(req: NextRequest) {
       emotionScore,
       confidence,
       disciplineScore,
+      biggestMistake,
+      improvementNext,
       notes,
       lessons,
       status,
@@ -77,6 +91,10 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Fetch account for pnlPercent auto-computation
+    const account = await db.account.findUnique({ where: { id: accountId } });
+    const initialCapital = account?.initialCapital ?? 0;
 
     // Auto-compute P/L, R/R, duration
     let finalPnl = typeof pnl === "number" ? pnl : 0;
@@ -104,6 +122,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Auto-compute pnlPercent if not provided
+    const finalPnlPercent =
+      typeof pnlPercent === "number"
+        ? pnlPercent
+        : initialCapital > 0
+        ? (finalPnl / initialCapital) * 100
+        : null;
+
     const trade = await db.trade.create({
       data: {
         accountId,
@@ -122,7 +148,7 @@ export async function POST(req: NextRequest) {
         rrRatio: finalRR,
         entryDate: new Date(entryDate),
         exitDate: exitDate ? new Date(exitDate) : null,
-        durationMin,
+        durationMin: typeof durationMinInput === "number" ? durationMinInput : durationMin,
         entryReason: entryReason ?? null,
         exitReason: exitReason ?? null,
         ruleViolated: ruleViolated || null,
@@ -136,7 +162,22 @@ export async function POST(req: NextRequest) {
       },
       include: { strategy: true, account: true },
     });
-    return NextResponse.json(trade, { status: 201 });
+
+    // Write the new discipline/calibration fields via raw SQL.
+    await updateTradeNewFields(trade.id, {
+      marketSession: marketSession ?? null,
+      marketBias: marketBias ?? null,
+      timeframe: timeframe ?? null,
+      riskPercent: riskPercent != null ? riskPercent : null,
+      pnlPercent: finalPnlPercent,
+      setupValid: setupValid != null ? setupValid : null,
+      rulesFollowed: rulesFollowed != null ? rulesFollowed : null,
+      biggestMistake: biggestMistake || null,
+      improvementNext: improvementNext || null,
+    });
+
+    const [enriched] = await enrichTradesWithNewFields([trade]);
+    return NextResponse.json(enriched, { status: 201 });
   } catch (e) {
     console.error("POST /api/trades error", e);
     return NextResponse.json(

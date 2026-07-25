@@ -11,8 +11,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DirectionBadge, PnlText, RText, StatusBadge } from "@/components/shared/badges";
 import { formatShortDate } from "@/lib/format";
-import { colorOf } from "@/lib/enums";
+import { colorOf, sessionAbbr } from "@/lib/enums";
 import { cn } from "@/lib/utils";
+import { Check, X, Minus } from "lucide-react";
 
 export function TradeTable({
   trades,
@@ -34,6 +35,8 @@ export function TradeTable({
                 <TableHead className="text-[10px] uppercase tracking-widest text-muted-foreground">Instrument</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-widest text-muted-foreground">Sens</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-widest text-muted-foreground">Stratégie</TableHead>
+                <TableHead className="text-[10px] uppercase tracking-widest text-muted-foreground">Sess.</TableHead>
+                <TableHead className="text-[10px] uppercase tracking-widest text-muted-foreground">Discipline</TableHead>
                 <TableHead className="text-right text-[10px] uppercase tracking-widest text-muted-foreground">Entrée</TableHead>
                 <TableHead className="text-right text-[10px] uppercase tracking-widest text-muted-foreground">Sortie</TableHead>
                 <TableHead className="text-right text-[10px] uppercase tracking-widest text-muted-foreground">R/R</TableHead>
@@ -44,6 +47,7 @@ export function TradeTable({
             <TableBody>
               {trades.map((t, i) => {
                 const c = t.strategy ? colorOf(t.strategy.color) : null;
+                const disc = disciplineDot(t.setupValid, t.rulesFollowed);
                 return (
                   <TableRow
                     key={t.id}
@@ -66,6 +70,29 @@ export function TradeTable({
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </TableCell>
+                    <TableCell>
+                      <span className="inline-flex rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[9px] uppercase text-muted-foreground">
+                        {sessionAbbr(t.marketSession)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={cn(
+                          "inline-flex h-5 w-5 items-center justify-center rounded-full",
+                          disc.bg,
+                          disc.text
+                        )}
+                        title={disc.title}
+                      >
+                        {disc.icon === "check" ? (
+                          <Check className="h-3 w-3" />
+                        ) : disc.icon === "x" ? (
+                          <X className="h-3 w-3" />
+                        ) : (
+                          <Minus className="h-3 w-3" />
+                        )}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-right font-mono text-xs">{fmtPrice(t.entryPrice, t.instrument)}</TableCell>
                     <TableCell className="text-right font-mono text-xs">
                       {t.exitPrice != null ? fmtPrice(t.exitPrice, t.instrument) : "—"}
@@ -85,6 +112,7 @@ export function TradeTable({
       <div className="space-y-2 md:hidden">
         {trades.map((t) => {
           const c = t.strategy ? colorOf(t.strategy.color) : null;
+          const disc = disciplineDot(t.setupValid, t.rulesFollowed);
           return (
             <button
               key={t.id}
@@ -95,9 +123,25 @@ export function TradeTable({
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-semibold">{t.instrument}</span>
                   <DirectionBadge direction={t.direction} />
+                  <span
+                    className={cn(
+                      "inline-flex h-4 w-4 items-center justify-center rounded-full",
+                      disc.bg,
+                      disc.text
+                    )}
+                  >
+                    {disc.icon === "check" ? (
+                      <Check className="h-2.5 w-2.5" />
+                    ) : disc.icon === "x" ? (
+                      <X className="h-2.5 w-2.5" />
+                    ) : (
+                      <Minus className="h-2.5 w-2.5" />
+                    )}
+                  </span>
                 </div>
                 <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span>{formatShortDate(t.entryDate)}</span>
+                  <span className="font-mono">{sessionAbbr(t.marketSession)}</span>
                   {t.strategy && (
                     <span className={cn("inline-flex items-center gap-1", c?.text)}>
                       <span className={cn("h-1.5 w-1.5 rounded-full", c?.dot)} />
@@ -118,6 +162,44 @@ export function TradeTable({
       </div>
     </>
   );
+}
+
+function disciplineDot(
+  setupValid: boolean | null | undefined,
+  rulesFollowed: boolean | null | undefined
+): { icon: "check" | "x" | "minus"; bg: string; text: string; title: string } {
+  const s = setupValid === true;
+  const r = rulesFollowed === true;
+  if (s && r) {
+    return {
+      icon: "check",
+      bg: "bg-emerald-500/15",
+      text: "text-emerald-500",
+      title: "Setup valide · Règles suivies",
+    };
+  }
+  if (s === false && r === false) {
+    return {
+      icon: "x",
+      bg: "bg-rose-500/15",
+      text: "text-rose-500",
+      title: "Setup invalide · Règles non suivies",
+    };
+  }
+  if (setupValid == null && rulesFollowed == null) {
+    return {
+      icon: "minus",
+      bg: "bg-white/5",
+      text: "text-muted-foreground",
+      title: "Discipline non renseignée",
+    };
+  }
+  return {
+    icon: "x",
+    bg: "bg-amber-500/15",
+    text: "text-amber-500",
+    title: "Discipline partielle",
+  };
 }
 
 function fmtPrice(p: number, instrument: string): string {

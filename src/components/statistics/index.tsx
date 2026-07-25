@@ -16,8 +16,24 @@ import { EmotionCorrelation } from "./emotion-correlation";
 import { LastNComparison } from "./last-20-comparison";
 import { EquityCurve as StatEquity } from "./equity-curve";
 import { AvgDurationCard } from "./avg-duration-card";
-import { EmptyState } from "@/components/shared/stat-card";
-import { BarChart3 } from "lucide-react";
+import { SessionPerformance } from "./session-performance";
+import { TimeframePerformance } from "./timeframe-performance";
+import { DisciplineGauge } from "./discipline-gauge";
+import { ConfidenceCalibration } from "./confidence-calibration";
+import { RiskDistribution } from "./risk-distribution";
+import { TopMistakes } from "./top-mistakes";
+import { BiasVsDirection } from "./bias-vs-direction";
+import { SessionStrategyHeatmap } from "./session-strategy-heatmap";
+import { ImprovementFollowThrough } from "./improvement-followthrough";
+import { EmptyState, StatCard } from "@/components/shared/stat-card";
+import { BarChart3, Target, ShieldCheck, CheckCircle2 } from "lucide-react";
+import { formatPercent } from "@/lib/format";
+
+interface Strategy {
+  id: string;
+  name: string;
+  color: string;
+}
 
 export function StatisticsView() {
   const { currentAccountId, refreshVersion } = useAppStore();
@@ -25,6 +41,9 @@ export function StatisticsView() {
     currentAccountId ? `/api/stats?accountId=${currentAccountId}` : null,
     { refreshKey: refreshVersion }
   );
+  const { data: strategies } = useFetch<Strategy[]>("/api/strategies", {
+    refreshKey: refreshVersion,
+  });
 
   if (!currentAccountId) {
     return (
@@ -50,14 +69,21 @@ export function StatisticsView() {
     );
   }
 
+  const d = stats.discipline ?? {
+    setupValidPct: 0,
+    rulesFollowedPct: 0,
+    overallPct: 0,
+  };
+
   return (
     <div className="space-y-6">
       <Tabs defaultValue="performance">
-        <TabsList className="grid w-full grid-cols-2 bg-zinc-900/60 md:flex md:w-auto md:grid-cols-4">
+        <TabsList className="grid w-full grid-cols-2 bg-zinc-900/60 md:flex md:w-auto md:grid-cols-5">
           <TabsTrigger value="performance" className="text-xs data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-400">Performance</TabsTrigger>
           <TabsTrigger value="distribution" className="text-xs data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-400">Distribution</TabsTrigger>
-          <TabsTrigger value="setups" className="text-xs data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-400">Setups & instruments</TabsTrigger>
+          <TabsTrigger value="setups" className="text-xs data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-400">Setups &amp; instruments</TabsTrigger>
           <TabsTrigger value="behavior" className="text-xs data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-400">Comportement</TabsTrigger>
+          <TabsTrigger value="discipline" className="text-xs data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-400">Discipline</TabsTrigger>
         </TabsList>
 
         <TabsContent value="performance" className="mt-4 space-y-6">
@@ -85,9 +111,56 @@ export function StatisticsView() {
           <TradeEvaluation stats={stats} />
           <EmotionCorrelation stats={stats} />
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <SessionPerformance stats={stats} />
+            <TimeframePerformance stats={stats} />
+          </div>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <AvgDurationCard stats={stats} />
             <LastNComparison stats={stats} />
           </div>
+        </TabsContent>
+
+        <TabsContent value="discipline" className="mt-4 space-y-6">
+          {/* KPI row */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <StatCard
+              label="Score de discipline"
+              value={formatPercent(d.overallPct)}
+              sublabel="Moyenne setup + règles"
+              accent={d.overallPct >= 70 ? "emerald" : d.overallPct >= 50 ? "default" : "rose"}
+              icon={<Target className="h-4 w-4" />}
+            />
+            <StatCard
+              label="Setup valide"
+              value={formatPercent(d.setupValidPct)}
+              sublabel="Trades avec setup confirmé"
+              accent={d.setupValidPct >= 70 ? "emerald" : d.setupValidPct >= 50 ? "default" : "rose"}
+              icon={<CheckCircle2 className="h-4 w-4" />}
+            />
+            <StatCard
+              label="Règles suivies"
+              value={formatPercent(d.rulesFollowedPct)}
+              sublabel="Trades selon le plan"
+              accent={d.rulesFollowedPct >= 70 ? "emerald" : d.rulesFollowedPct >= 50 ? "default" : "rose"}
+              icon={<ShieldCheck className="h-4 w-4" />}
+            />
+          </div>
+
+          <DisciplineGauge stats={stats} />
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <RiskDistribution stats={stats} />
+            <ConfidenceCalibration stats={stats} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <BiasVsDirection stats={stats} />
+            <TopMistakes stats={stats} />
+          </div>
+
+          <SessionStrategyHeatmap stats={stats} strategies={strategies ?? []} />
+
+          <ImprovementFollowThrough stats={stats} />
         </TabsContent>
       </Tabs>
     </div>
