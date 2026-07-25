@@ -1,0 +1,139 @@
+// Trading Journal - Prisma Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id              String   @id @default(cuid())
+  name            String
+  broker          String?
+  initialCapital  Float    @default(10000)
+  currency        String   @default("USD")
+  color           String   @default("emerald")
+  isDefault       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  trades          Trade[]
+}
+
+model Strategy {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  category    String?  // Breakout, Pullback, Range, News, Scalp, Swing, Trend Following
+  color       String   @default("cyan")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  trades      Trade[]
+}
+
+model Trade {
+  id             String   @id @default(cuid())
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId      String
+  strategy       Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+  strategyId     String?
+
+  // Instrument & direction
+  instrument     String   // e.g. EURUSD, AAPL, BTCUSD
+  assetClass     String   @default("forex") // forex, stock, crypto, futures, options
+  direction      String   // long, short
+  orderType      String   @default("market") // market, limit, stop
+
+  // Prices
+  entryPrice     Float
+  exitPrice      Float?
+  stopLoss       Float?
+  takeProfit     Float?
+  positionSize   Float    @default(1) // lots, shares, contracts
+
+  // P/L
+  pnl            Float    @default(0)
+  pnlPips        Float?
+  fees           Float    @default(0)
+  rrRatio        Float?   // realized risk/reward ratio
+
+  // Dates & duration
+  entryDate      DateTime
+  exitDate       DateTime?
+  durationMin    Int?     // duration in minutes
+
+  // Reasons (predefined values from user request)
+  entryReason    String?  // selon le plan, configuration, signal, news, etc.
+  exitReason     String?  // selon le plan, trop tôt, violation des règles, stop touché, TP touché
+  ruleViolated   String?  // which rule was violated (if any)
+
+  // Psychology
+  emotion        String?  // peur, espoir, avidité, FOMO, confiance, calme, frustration
+  emotionScore   Int?     // 1-10 intensity
+  confidence     Int?     // 1-10 pre-trade confidence
+  disciplineScore Int?    // 1-10 self-rated discipline
+
+  // Notes
+  notes          String?
+  lessons        String?  // lessons learned
+  screenshotUrl  String?
+
+  // Status
+  status         String   @default("closed") // open, closed
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([accountId])
+  @@index([strategyId])
+  @@index([entryDate])
+  @@index([instrument])
+}
+
+model Rule {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    String   @default("risk") // risk, entry, exit, psychology, money_management
+  severity    String   @default("high") // low, medium, high, critical
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PsychologicalCheck {
+  id            String   @id @default(cuid())
+  date          DateTime
+  // Daily habits (from image 1)
+  marketAnalysis      Boolean @default(false)
+  reviewPlan          Boolean @default(false)
+  journalUpdate       Boolean @default(false)
+  mindfulness         Boolean @default(false)
+  // Mental state
+  moodScore     Int?     // 1-10
+  focusScore    Int?     // 1-10
+  disciplineScore Int?   // 1-10
+  // Pre-market checklist
+  preMarketDone Boolean  @default(false)
+  postMarketDone Boolean @default(false)
+  // Notes
+  reflection    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([date])
+}
+
+model TradingGoal {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  targetValue Float?
+  currentValue Float?
+  unit        String?  // %, $, trades, R
+  deadline    DateTime?
+  isAchieved  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
