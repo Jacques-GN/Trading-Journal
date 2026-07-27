@@ -50,5 +50,25 @@ test
 prompt
 
 server.log
+
 # Skills directory
 /skills/
+
+# Database (user data — do not commit)
+/db/*.db
+/db/*.db-journal
+
+# Uploaded reference images & screenshots (local only)
+/upload/
+
+# Agent context (private work logs)
+/agent-ctx/
+
+# Sandbox scripts (environment-specific)
+/.zscripts/
+
+# Local build artifacts
+/standalone/
+
+# OS files
+Thumbs.db
